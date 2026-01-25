@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use futures_util::future::select_all;
 use reqwest::StatusCode;
 use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, HeaderValue, WWW_AUTHENTICATE};
 use serde::Deserialize;
@@ -210,11 +211,20 @@ impl Downloader {
             handles.push(handle);
         }
 
-        // Wait for first successful result
+        // Race all handles - return first success, keep trying on failures
+        let mut pending = handles;
         let mut last_error = None;
-        for handle in handles {
-            match handle.await {
-                Ok(Ok(path)) => return Ok(path),
+
+        while !pending.is_empty() {
+            let (result, _index, remaining) = select_all(pending).await;
+            pending = remaining;
+
+            match result {
+                Ok(Ok(path)) => {
+                    // Cancel remaining downloads by dropping their handles
+                    drop(pending);
+                    return Ok(path);
+                }
                 Ok(Err(e)) => last_error = Some(e),
                 Err(e) => {
                     last_error = Some(Error::NetworkFailure {

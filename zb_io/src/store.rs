@@ -65,6 +65,12 @@ impl Store {
             .store_dir
             .join(format!(".{store_key}.tmp.{}", std::process::id()));
 
+        // Clean up any leftover temp directory from a previous interrupted extraction
+        // (can happen if the process crashed or was killed during extraction)
+        if tmp_dir.exists() {
+            let _ = fs::remove_dir_all(&tmp_dir);
+        }
+
         fs::create_dir_all(&tmp_dir).map_err(|e| Error::StoreCorruption {
             message: format!("failed to create temp directory: {e}"),
         })?;
