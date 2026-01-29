@@ -31,7 +31,7 @@ async fn run(cli: Cli) -> Result<(), zb_core::Error> {
     }
 
     if !matches!(cli.command, Commands::Reset { .. }) {
-        ensure_init(&root, &prefix)?;
+        ensure_init(&root, &prefix, cli.auto_init)?;
     }
 
     let mut installer = create_installer(&root, &prefix, cli.concurrency)?;

@@ -35,12 +35,43 @@ pub fn execute(root: &Path, prefix: &Path, yes: bool) -> Result<(), zb_core::Err
         }
 
         println!(
-            "{} Removing {}...",
+            "{} Clearing {}...",
             style("==>").cyan().bold(),
             dir.display()
         );
 
-        if std::fs::remove_dir_all(dir).is_err() {
+        // Instead of removing the directory entirely (which would require sudo to recreate),
+        // just remove its contents. This avoids needing sudo when run_init recreates subdirs.
+        let mut failed = false;
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let result = if path.is_dir() {
+                    std::fs::remove_dir_all(&path)
+                } else {
+                    std::fs::remove_file(&path)
+                };
+                if result.is_err() {
+                    failed = true;
+                    break;
+                }
+            }
+        } else {
+            failed = true;
+        }
+
+        // Only fall back to sudo if we couldn't clear contents AND stdout is a terminal
+        if failed {
+            if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+                eprintln!(
+                    "{} Failed to clear {} (permission denied, non-interactive mode)",
+                    style("error:").red().bold(),
+                    dir.display()
+                );
+                std::process::exit(1);
+            }
+
+            // Interactive mode: fall back to sudo for the entire directory
             let status = Command::new("sudo")
                 .args(["rm", "-rf", &dir.to_string_lossy()])
                 .status();

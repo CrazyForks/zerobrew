@@ -106,13 +106,36 @@ are contained and cleanly seperated, properly describing/notating which commits 
 To benchmark performance:
 
 ```bash
-./benchmark.sh
+just bench --full
 ```
 
 This runs a 100-package installation suite comparing zerobrew to Homebrew. This is especially crucial to run if you are 
 planning on contributing to performance/optimization related changes.
 
+Useful options:
+
+```bash
+just bench --quick
+just bench --dry-run
+just bench --full results/
+just bench --format csv --output benchmark.csv
+just bench --log bench.log
+```
+
+Notes:
+- Defaults to the quick package list (22 packages); use `--full` for all 100.
+- `--full [dir]` writes all formats (txt/json/csv/html) to the directory.
+- `--output` infers format from file extension when `--format` is omitted.
+- Output includes cold + warm cache speedups per package.
+
+### macOS Homebrew permissions
+
+On macOS, Homebrew should be installed with a user-writable prefix. If `just bench` fails with a permission error, fix it by running:
+
+```bash
+sudo chown -R "$(whoami)" "$(brew --prefix)"
+```
+
 ## Questions?
 
 For further questions, open an issue on GitHub.
-

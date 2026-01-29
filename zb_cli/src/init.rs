@@ -260,32 +260,49 @@ _zb_path_append "$ZEROBREW_PREFIX/bin"
     Ok(())
 }
 
-pub fn ensure_init(root: &Path, prefix: &Path) -> Result<(), zb_core::Error> {
+pub fn ensure_init(root: &Path, prefix: &Path, auto_init: bool) -> Result<(), zb_core::Error> {
     if !needs_init(root, prefix) {
         return Ok(());
     }
 
-    println!(
-        "{} Zerobrew needs to be initialized first.",
-        style("Note:").yellow().bold()
-    );
-    println!("    This will create directories at:");
-    println!("      • {}", root.display());
-    println!("      • {}", prefix.display());
-    println!();
+    // Check if both stdin and stdout are TTYs
+    // If stdout is not a TTY, the user won't see the prompt, so don't prompt
+    // If stdin is not a TTY, we can't read input, so don't prompt
+    let is_interactive = std::io::IsTerminal::is_terminal(&std::io::stdin())
+        && std::io::IsTerminal::is_terminal(&std::io::stdout());
 
-    print!("Initialize now? [Y/n] ");
-    std::io::stdout().flush().unwrap();
+    if is_interactive && !auto_init {
+        println!(
+            "{} Zerobrew needs to be initialized first.",
+            style("Note:").yellow().bold()
+        );
+        println!("    This will create directories at:");
+        println!("      • {}", root.display());
+        println!("      • {}", prefix.display());
+        println!();
 
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input).unwrap();
-    let input = input.trim();
+        print!("Initialize now? [Y/n] ");
+        std::io::stdout().flush().unwrap();
 
-    if !input.is_empty() && !input.eq_ignore_ascii_case("y") && !input.eq_ignore_ascii_case("yes") {
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+        let input = input.trim();
+
+        if !input.is_empty()
+            && !input.eq_ignore_ascii_case("y")
+            && !input.eq_ignore_ascii_case("yes")
+        {
+            return Err(zb_core::Error::StoreCorruption {
+                message: "Initialization required. Run 'zb init' first.".to_string(),
+            });
+        }
+    }
+    if !is_interactive && !auto_init {
         return Err(zb_core::Error::StoreCorruption {
             message: "Initialization required. Run 'zb init' first.".to_string(),
         });
     }
+    // Auto-initialize without prompting when non-interactive or auto_init is set
 
     // Pass false for no_modify_shell since user confirmed they want full initialization
     run_init(root, prefix, false).map_err(|e| match e {

@@ -15,6 +15,14 @@ pub struct Cli {
     #[arg(long, default_value = "20")]
     pub concurrency: usize,
 
+    #[arg(
+        long = "auto-init",
+        alias = "yes",
+        global = true,
+        env = "ZEROBREW_AUTO_INIT"
+    )]
+    pub auto_init: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }

@@ -16,6 +16,7 @@ impl TestEnv {
         let zb = env!("CARGO_BIN_EXE_zb");
         Command::new(zb)
             .env("ZEROBREW_ROOT", self.root.path())
+            .env("ZEROBREW_AUTO_INIT", "true")
             .args(args)
             .output()
             .unwrap_or_else(|_| panic!("failed to execute {zb} command"))
