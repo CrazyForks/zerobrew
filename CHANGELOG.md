@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- `zb upgrade` command to upgrade installed packages, with `--build-from-source` and `--no-link` flags; supports upgrading all outdated packages or specific ones by name
 - Chinese translation of the README ([#315](https://github.com/lucasgelfond/zerobrew/pull/316))
 - Regex matches on `/Cellar/<pkg>/)([^/]+)(/)`, so it only matches version segments within Cellar-style paths ([#317](https://github.com/lucasgelfond/zerobrew/pull/317))
 

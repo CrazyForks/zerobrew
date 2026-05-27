@@ -4,6 +4,7 @@ mod outdated;
 mod plan;
 mod source;
 mod uninstall;
+mod upgrade;
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -27,6 +28,21 @@ use zb_core::{Error, Formula, InstallMethod};
 use bottle::dependency_cellar_path;
 
 const MAX_CORRUPTION_RETRIES: usize = 3;
+
+/// Acquire the cross-process install lock. The returned `File` must be kept
+/// alive (e.g. `let _lock = ...`) for the duration the lock should be held —
+/// dropping it releases the flock. Re-acquiring in the same process while the
+/// guard is alive would deadlock, so multi-step flows (e.g. `upgrade`) take
+/// the lock once and call the no-lock `execute_inner` directly.
+pub(crate) fn acquire_install_lock(locks_dir: &Path) -> Result<File, Error> {
+    let lock_path = locks_dir.join("install.lock");
+    let lock_file =
+        File::create(&lock_path).map_err(Error::store("failed to create install lock"))?;
+    lock_file
+        .lock_exclusive()
+        .map_err(Error::store("failed to acquire install lock"))?;
+    Ok(lock_file)
+}
 
 pub struct Installer {
     api_client: ApiClient,
@@ -107,14 +123,19 @@ impl Installer {
         link: bool,
         progress: Option<Arc<ProgressCallback>>,
     ) -> Result<ExecuteResult, Error> {
-        let lock_path = self.locks_dir.join("install.lock");
-        let lock_file =
-            File::create(&lock_path).map_err(Error::store("failed to create install lock"))?;
-        lock_file
-            .lock_exclusive()
-            .map_err(Error::store("failed to acquire install lock"))?;
-        let _lock = lock_file;
+        let _lock = acquire_install_lock(&self.locks_dir)?;
+        self.execute_inner(plan, link, progress).await
+    }
 
+    /// No-lock variant of `execute_with_progress`. Callers MUST already hold
+    /// the install lock — used by `upgrade` to compose uninstall + install
+    /// under a single lock acquisition.
+    pub(crate) async fn execute_inner(
+        &mut self,
+        plan: InstallPlan,
+        link: bool,
+        progress: Option<Arc<ProgressCallback>>,
+    ) -> Result<ExecuteResult, Error> {
         let report = |event: InstallProgress| {
             if let Some(ref cb) = progress {
                 cb(event);
@@ -343,6 +364,10 @@ pub fn create_installer(
 #[cfg(test)]
 mod test_support {
     pub fn create_bottle_tarball(formula_name: &str) -> Vec<u8> {
+        create_bottle_tarball_with_version(formula_name, "1.0.0")
+    }
+
+    pub fn create_bottle_tarball_with_version(formula_name: &str, version: &str) -> Vec<u8> {
         use flate2::Compression;
         use flate2::write::GzEncoder;
         use std::io::Write;
@@ -350,15 +375,16 @@ mod test_support {
 
         let mut builder = Builder::new(Vec::new());
 
+        let content = format!("#!/bin/sh\necho {} v{}", formula_name, version);
+
         let mut header = tar::Header::new_gnu();
         header
-            .set_path(format!("{}/1.0.0/bin/{}", formula_name, formula_name))
+            .set_path(format!("{}/{}/bin/{}", formula_name, version, formula_name))
             .unwrap();
-        header.set_size(20);
+        header.set_size(content.len() as u64);
         header.set_mode(0o755);
         header.set_cksum();
 
-        let content = format!("#!/bin/sh\necho {}", formula_name);
         builder.append(&header, content.as_bytes()).unwrap();
 
         let tar_data = builder.into_inner().unwrap();

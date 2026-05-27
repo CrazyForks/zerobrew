@@ -44,6 +44,9 @@ zb bundle install -f myfile     # 从自定义文件安装
 zb bundle dump                  # 将已安装的软件包导出到 Brewfile
 zb bundle dump -f out --force   # 导出到自定义文件（覆盖）
 zb uninstall jq                 # 卸载单个软件包
+zb outdated                     # 列出有新版本可用的软件包
+zb upgrade                      # 升级所有已过期的软件包
+zb upgrade jq wget              # 升级指定的软件包
 zb reset                        # 卸载所有内容
 zb gc                           # 垃圾回收未使用的存储条目
 zbx jq --version                # 在不链接的情况下运行

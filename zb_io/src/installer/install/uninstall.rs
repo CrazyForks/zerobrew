@@ -7,9 +7,13 @@ impl Installer {
         let installed = self.db.get_installed(name).ok_or(Error::NotInstalled {
             name: name.to_string(),
         })?;
-        let keg_name = formula_token(&installed.name);
+        self.uninstall_by_version(name, &installed.version)
+    }
 
-        let keg_path = self.cellar.keg_path(keg_name, &installed.version);
+    pub fn uninstall_by_version(&mut self, name: &str, version: &str) -> Result<(), Error> {
+        let keg_name = formula_token(name);
+
+        let keg_path = self.cellar.keg_path(keg_name, version);
         self.linker.unlink_keg(&keg_path)?;
 
         {
@@ -18,7 +22,7 @@ impl Installer {
             tx.commit()?;
         }
 
-        self.cellar.remove_keg(keg_name, &installed.version)?;
+        self.cellar.remove_keg(keg_name, version)?;
 
         Ok(())
     }

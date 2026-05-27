@@ -181,6 +181,15 @@ pub enum Commands {
         #[arg(long, conflicts_with_all = ["quiet", "verbose"], help = "Output as JSON")]
         json: bool,
     },
+    /// Upgrade installed packages to the latest versions
+    Upgrade {
+        #[arg(required = false, num_args = 0..)]
+        formulas: Vec<String>,
+        #[arg(long, short = 's', help = "Build from source instead of using bottles")]
+        build_from_source: bool,
+        #[arg(long, help = "Do not create symlinks after installation")]
+        no_link: bool,
+    },
 }
 
 #[derive(Subcommand)]

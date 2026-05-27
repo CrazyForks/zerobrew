@@ -44,6 +44,9 @@ zb bundle install -f myfile     # install from custom file
 zb bundle dump                  # export installed packages to Brewfile
 zb bundle dump -f out --force   # dump to custom file (overwrite)
 zb uninstall jq                 # uninstall one package
+zb outdated                     # list packages with newer versions
+zb upgrade                      # upgrade all outdated packages
+zb upgrade jq wget              # upgrade specific packages
 zb reset                        # uninstall everything
 zb gc                           # garbage collect unused store entries
 zbx jq --version                # run without linking
