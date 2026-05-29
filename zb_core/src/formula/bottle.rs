@@ -23,6 +23,16 @@ fn preferred_linux_bottle_tags() -> &'static [&'static str] {
     preferred_linux_bottle_tags_for_arch(std::env::consts::ARCH)
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn is_compatible_linux_bottle_tag_for_arch(tag: &str, arch: &str) -> bool {
+    preferred_linux_bottle_tags_for_arch(arch).contains(&tag)
+}
+
+#[cfg(target_os = "linux")]
+fn is_compatible_linux_bottle_tag(tag: &str) -> bool {
+    is_compatible_linux_bottle_tag_for_arch(tag, std::env::consts::ARCH)
+}
+
 #[cfg(target_os = "macos")]
 pub fn macos_major_version() -> Option<u32> {
     let output = std::process::Command::new("sw_vers")
@@ -160,7 +170,7 @@ fn select_bottle_with_version(
 
     #[cfg(target_os = "linux")]
     for (tag, file) in &formula.bottle.stable.files {
-        if tag.contains("linux") {
+        if is_compatible_linux_bottle_tag(tag) {
             return Ok(SelectedBottle {
                 tag: tag.clone(),
                 url: file.url.clone(),
@@ -241,6 +251,18 @@ mod tests {
             preferred_linux_bottle_tags_for_arch("x86_64"),
             &["x86_64_linux"]
         );
+    }
+
+    #[test]
+    fn linux_fallback_rejects_cross_arch_bottle_tags() {
+        assert!(!is_compatible_linux_bottle_tag_for_arch(
+            "x86_64_linux",
+            "aarch64"
+        ));
+        assert!(!is_compatible_linux_bottle_tag_for_arch(
+            "arm64_linux",
+            "x86_64"
+        ));
     }
 
     #[test]
