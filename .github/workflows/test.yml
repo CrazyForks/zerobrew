@@ -25,13 +25,10 @@ jobs:
         include:
           - os: macos-latest
             name: macos-arm64
-            rust: stable
-          - os: macos-latest
-            name: macos-arm64
-            rust: "1.90"
+            rust: "1.95"
           - os: ubuntu-latest
             name: linux
-            rust: stable
+            rust: "1.95"
     steps:
       - uses: actions/checkout@v4
       

@@ -1,6 +1,18 @@
 use sha2::{Digest, Sha256};
 use zb_core::Error;
 
+/// Format a SHA-256 digest as a lowercase hex string.
+pub fn sha256_hex(hasher: Sha256) -> String {
+    hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut s, b| {
+            use std::fmt::Write;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
 /// Verify the SHA-256 checksum of a byte slice.
 ///
 /// When `expected_sha256` is `None` the check is skipped (caller opted out).
@@ -15,7 +27,7 @@ pub fn verify_sha256_bytes(bytes: &[u8], expected_sha256: Option<&str>) -> Resul
 
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    let actual = format!("{:x}", hasher.finalize());
+    let actual = sha256_hex(hasher);
 
     if actual != expected {
         return Err(Error::ChecksumMismatch { expected, actual });

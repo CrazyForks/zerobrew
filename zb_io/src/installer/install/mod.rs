@@ -10,7 +10,6 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fs4::fs_std::FileExt;
 use tracing::warn;
 
 use crate::cellar::link::Linker;
@@ -39,7 +38,7 @@ pub(crate) fn acquire_install_lock(locks_dir: &Path) -> Result<File, Error> {
     let lock_file =
         File::create(&lock_path).map_err(Error::store("failed to create install lock"))?;
     lock_file
-        .lock_exclusive()
+        .lock()
         .map_err(Error::store("failed to acquire install lock"))?;
     Ok(lock_file)
 }
@@ -398,7 +397,7 @@ mod test_support {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(data);
-        format!("{:x}", hasher.finalize())
+        crate::checksum::sha256_hex(hasher)
     }
 
     pub fn get_test_bottle_tag() -> &'static str {

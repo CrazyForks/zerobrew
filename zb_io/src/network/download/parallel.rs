@@ -259,7 +259,7 @@ mod tests {
         let actual_sha256 = {
             let mut hasher = Sha256::new();
             hasher.update(content);
-            format!("{:x}", hasher.finalize())
+            crate::checksum::sha256_hex(hasher)
         };
 
         Mock::given(method("GET"))

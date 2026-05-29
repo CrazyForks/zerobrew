@@ -112,8 +112,9 @@ impl ApiClient {
         let client = reqwest::Client::builder()
             .user_agent("zerobrew/0.1")
             .pool_max_idle_per_host(20)
+            .use_preconfigured_tls((*crate::network::tls::shared_tls_config()).clone())
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("failed to build HTTP client");
 
         Self {
             base_url,

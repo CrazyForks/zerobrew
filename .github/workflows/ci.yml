@@ -26,9 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: install rust stable
+      - name: install rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.95"
           components: rustfmt
       
       - name: check formatting
@@ -40,9 +41,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: install rust stable
+      - name: install rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.95"
           components: clippy
       
       - name: cache rust dependencies

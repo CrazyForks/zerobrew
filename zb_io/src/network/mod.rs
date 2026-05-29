@@ -3,6 +3,7 @@ pub mod cache;
 pub mod download;
 pub mod suggest;
 pub mod tap_formula;
+pub(crate) mod tls;
 
 pub use api::ApiClient;
 pub use cache::{ApiCache, CacheEntry};

@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::{Notify, RwLock, Semaphore};
 use tracing::warn;
 
+use crate::network::tls::shared_tls_config;
 use crate::progress::InstallProgress;
 use crate::storage::blob::BlobCache;
 use zb_core::Error;
@@ -50,56 +51,12 @@ fn transform_url_to_mirror(url: &str, mirror_domain: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn build_rustls_config() -> Option<rustls::ClientConfig> {
-    let provider = rustls::crypto::aws_lc_rs::default_provider();
-
-    let mut root_store = rustls::RootCertStore::empty();
-
-    let cert_result = rustls_native_certs::load_native_certs();
-    if !cert_result.errors.is_empty() {
-        let details = cert_result
-            .errors
-            .iter()
-            .take(3)
-            .map(std::string::ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("; ");
-        warn!(
-            errors = cert_result.errors.len(),
-            details = %details,
-            "failed to load native certificates"
-        );
-    }
-
-    for cert in cert_result.certs {
-        let _ = root_store.add(cert);
-    }
-
-    let builder = rustls::ClientConfig::builder_with_provider(provider.into());
-    let builder = match builder.with_safe_default_protocol_versions() {
-        Ok(builder) => builder,
-        Err(e) => {
-            warn!(
-                error = %e,
-                "failed to configure rustls protocol versions; falling back to reqwest default TLS"
-            );
-            return None;
-        }
-    };
-
-    Some(
-        builder
-            .with_root_certificates(root_store)
-            .with_no_client_auth(),
-    )
-}
-
 pub struct Downloader {
     client: reqwest::Client,
     pub(crate) blob_cache: BlobCache,
     pub(crate) token_cache: TokenCache,
     pub(crate) global_semaphore: Option<Arc<Semaphore>>,
-    tls_config: Option<Arc<rustls::ClientConfig>>,
+    tls_config: Arc<rustls::ClientConfig>,
 }
 
 impl Downloader {
@@ -108,21 +65,24 @@ impl Downloader {
     }
 
     pub fn with_semaphore(blob_cache: BlobCache, semaphore: Option<Arc<Semaphore>>) -> Self {
-        let tls_config = build_rustls_config().map(Arc::new);
+        let tls_config = shared_tls_config();
+
+        let client = reqwest::Client::builder()
+            .user_agent("zerobrew/0.1")
+            .use_preconfigured_tls((*tls_config).clone())
+            .pool_max_idle_per_host(10)
+            .tcp_nodelay(true)
+            .tcp_keepalive(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(300))
+            .http2_adaptive_window(true)
+            .http2_initial_stream_window_size(Some(2 * 1024 * 1024))
+            .http2_initial_connection_window_size(Some(4 * 1024 * 1024))
+            .build()
+            .expect("failed to build HTTP client");
 
         Self {
-            client: reqwest::Client::builder()
-                .user_agent("zerobrew/0.1")
-                .pool_max_idle_per_host(10)
-                .tcp_nodelay(true)
-                .tcp_keepalive(Duration::from_secs(60))
-                .connect_timeout(Duration::from_secs(30))
-                .timeout(Duration::from_secs(300))
-                .http2_adaptive_window(true)
-                .http2_initial_stream_window_size(Some(2 * 1024 * 1024))
-                .http2_initial_connection_window_size(Some(4 * 1024 * 1024))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            client,
             blob_cache,
             token_cache: Arc::new(RwLock::new(HashMap::new())),
             global_semaphore: semaphore,
@@ -131,12 +91,9 @@ impl Downloader {
     }
 
     fn create_isolated_client(&self) -> reqwest::Client {
-        let mut builder = reqwest::Client::builder().user_agent("zerobrew/0.1");
-        if let Some(tls_config) = &self.tls_config {
-            builder = builder.use_preconfigured_tls(tls_config.clone());
-        }
-
-        builder
+        reqwest::Client::builder()
+            .user_agent("zerobrew/0.1")
+            .use_preconfigured_tls((*self.tls_config).clone())
             .pool_max_idle_per_host(0)
             .tcp_nodelay(true)
             .tcp_keepalive(Duration::from_secs(60))
@@ -146,7 +103,7 @@ impl Downloader {
             .http2_initial_stream_window_size(Some(2 * 1024 * 1024))
             .http2_initial_connection_window_size(Some(4 * 1024 * 1024))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new())
+            .expect("failed to build isolated HTTP client")
     }
 
     pub fn remove_blob(&self, sha256: &str) -> bool {
@@ -437,7 +394,7 @@ pub(crate) async fn download_response_internal(
         }
     }
 
-    let actual_hash = format!("{:x}", hasher.finalize());
+    let actual_hash = crate::checksum::sha256_hex(hasher);
 
     if actual_hash != expected_sha256 {
         return Err(Error::ChecksumMismatch {
@@ -466,11 +423,6 @@ mod tests {
     use tempfile::TempDir;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    #[test]
-    fn build_rustls_config_does_not_panic() {
-        let _ = build_rustls_config();
-    }
 
     #[tokio::test]
     async fn valid_checksum_passes() {

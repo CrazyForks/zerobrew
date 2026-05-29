@@ -27,6 +27,8 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4

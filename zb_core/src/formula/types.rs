@@ -183,10 +183,9 @@ impl Formula {
     }
 
     pub fn runtime_dependencies(&self) -> Vec<String> {
-        let mut deps = self.platform_dependencies();
-
         #[cfg(not(target_os = "macos"))]
         {
+            let mut deps = self.platform_dependencies();
             for dep in self
                 .active_uses_from_macos()
                 .iter()
@@ -194,9 +193,13 @@ impl Formula {
             {
                 push_unique_dep(&mut deps, dep.name());
             }
+            deps
         }
 
-        deps
+        #[cfg(target_os = "macos")]
+        {
+            self.platform_dependencies()
+        }
     }
 
     fn platform_dependencies(&self) -> Vec<String> {
@@ -208,6 +211,7 @@ impl Formula {
         self.dependencies.clone()
     }
 
+    #[cfg(target_os = "linux")]
     fn variation_dependencies(&self, keys: &[&str]) -> Option<Vec<String>> {
         let variations = self.variations.as_ref()?.as_object()?;
         for key in keys {
