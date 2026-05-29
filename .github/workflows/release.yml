@@ -73,6 +73,9 @@ jobs:
       - name: Build release binary
         env:
           LZMA_API_STATIC: "1"
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
         run: cargo build --release --locked --target ${{ matrix.target }} --package zb_cli
 
       - name: Verify no dynamic liblzma dependency (macOS)
