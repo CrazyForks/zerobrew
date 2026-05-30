@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Centralize a single, sandbox-tolerant rustls `ClientConfig` in `network::tls`: prefer native roots, and fall back to the bundled webpki-roots Mozilla roots when no system trust store is available ([#375](https://github.com/lucasgelfond/zerobrew/pull/375))
 - Correct migration behavior on unplannable formulas ([#380](https://github.com/lucasgelfond/zerobrew/pull/380))
 
+### Changed
+- Clarify standalone installer shell setup and update flow: surface `zb init` output, print the `source` command after shell config changes, print exact `export`/fish commands for `--no-modify-path`, report installed/updated/already-current status on reruns, and warn when an older `zb` still appears earlier in `PATH` ([#381](https://github.com/lucasgelfond/zerobrew/pull/381))
+- Clarify `zb update` help/output and README update docs so users know `zb update` refreshes package metadata while the installer or Homebrew updates the `zb` binary itself ([#381](https://github.com/lucasgelfond/zerobrew/pull/381))
+
 ## [0.3.0] - 2026-05-29
 
 ### Added

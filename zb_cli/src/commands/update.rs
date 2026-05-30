@@ -12,6 +12,13 @@ pub fn execute(installer: &mut zb_io::Installer) -> Result<(), zb_core::Error> {
             if removed == 1 { "entry" } else { "entries" }
         );
     }
-    println!("{}", style("Run `zb outdated` to check for updates.").dim());
+    println!(
+        "{}",
+        style("Run `zb outdated` to check package updates.").dim()
+    );
+    println!(
+        "{}",
+        style("This does not update the zb binary; use the installer or Homebrew for that.").dim()
+    );
     Ok(())
 }

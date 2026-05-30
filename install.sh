@@ -58,6 +58,8 @@ trap cleanup EXIT
 ZEROBREW_REPO="https://github.com/lucasgelfond/zerobrew.git"
 : "${ZEROBREW_DIR:=$HOME/.zerobrew}"
 : "${ZEROBREW_BIN:=$HOME/.local/bin}"
+ORIGINAL_PATH="$PATH"
+PREVIOUS_ZB_VERSION=""
 
 if [[ -d "/opt/zerobrew" ]]; then
     ZEROBREW_ROOT="/opt/zerobrew"
@@ -148,6 +150,46 @@ warn() {
     printf "%b[!]%b %b\n" "$ORANGE" "$NC" "$1" >&2
 }
 
+zb_version() {
+    local zb_path="$1"
+
+    if [[ -x "$zb_path" ]]; then
+        "$zb_path" --version 2>/dev/null || true
+    fi
+}
+
+detect_existing_zb() {
+    PREVIOUS_ZB_VERSION="$(zb_version "$ZEROBREW_BIN/zb")"
+}
+
+report_zb_version() {
+    local installed_zb="$ZEROBREW_BIN/zb"
+    local installed_version
+    installed_version="$(zb_version "$installed_zb")"
+
+    if [[ -z "$installed_version" ]]; then
+        return
+    fi
+
+    if [[ -z "$PREVIOUS_ZB_VERSION" ]]; then
+        completed "Installed ${ORANGE}${installed_version}${NC}"
+    elif [[ "$PREVIOUS_ZB_VERSION" == "$installed_version" ]]; then
+        completed "${ORANGE}${installed_version}${NC} is already up to date"
+    else
+        completed "Updated zerobrew from ${ORANGE}${PREVIOUS_ZB_VERSION}${NC} to ${ORANGE}${installed_version}${NC}"
+    fi
+
+    local current_path_zb
+    current_path_zb="$(PATH="$ORIGINAL_PATH" command -v zb 2>/dev/null || true)"
+    if [[ -z "$current_path_zb" ]]; then
+        warn "zb is installed at ${installed_zb}, but your current shell may not see it until you restart or source your shell config."
+    elif [[ "$current_path_zb" != "$installed_zb" ]]; then
+        local current_path_version
+        current_path_version="$(zb_version "$current_path_zb")"
+        warn "Your current shell finds ${current_path_zb}${current_path_version:+ ($current_path_version)} before ${installed_zb}. Restart your terminal or adjust PATH if zb still reports an old version."
+    fi
+}
+
 check_command() {
     local cmd="$1"
     local install_hint="${2:-}"
@@ -195,7 +237,7 @@ zb_init() {
         init_args+=("--no-modify-path")
     fi
 
-    "$zb_path" init ${init_args[@]+"${init_args[@]}"} >/dev/null 2>&1 || error_exit "Failed to initialize zerobrew"
+    "$zb_path" init ${init_args[@]+"${init_args[@]}"} || error_exit "Failed to initialize zerobrew"
 }
 
 finalize_installation() {
@@ -212,6 +254,7 @@ finalize_installation() {
     fi
 
     zb_init "$ZEROBREW_BIN/zb" "$no_modify"
+    report_zb_version
 
     print_logo
     completed "Installation complete"
@@ -352,6 +395,8 @@ while [[ $# -gt 0 ]]; do
         ;;
     esac
 done
+
+detect_existing_zb
 
 # Skip all if binary path is provided
 if [[ ${#binary_paths[@]} -gt 0 ]]; then

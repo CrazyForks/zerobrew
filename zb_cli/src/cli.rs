@@ -177,7 +177,7 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Clear cached formula data
+    /// Refresh cached formula metadata
     Update,
     /// List installed packages with newer versions available
     Outdated {
