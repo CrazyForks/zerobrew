@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Fixed
-Centralize a single, sandbox-tolerant rustls `ClientConfig` in `network::tls`: prefer native roots, and fall back to the bundled webpki-roots Mozilla roots when no system trust store is available ([#375](https://github.com/lucasgelfond/zerobrew/pull/375))
+- Centralize a single, sandbox-tolerant rustls `ClientConfig` in `network::tls`: prefer native roots, and fall back to the bundled webpki-roots Mozilla roots when no system trust store is available ([#375](https://github.com/lucasgelfond/zerobrew/pull/375))
+- Correct migration behavior on unplannable formulas ([#380](https://github.com/lucasgelfond/zerobrew/pull/380))
 
 ## [0.3.0] - 2026-05-29
 
