@@ -84,15 +84,31 @@ pub async fn execute(
 
     let formula_names: Vec<String> = packages.formulas.iter().map(|f| f.name.clone()).collect();
 
-    crate::commands::install::execute(
-        installer,
-        formula_names.clone(),
-        false, // no_link
-        false, // build_from_source
-        ui,
-    )
-    .await
-    .ok();
+    let (plan, planning_failures) = installer.plan_best_effort(&formula_names, false).await;
+    if !planning_failures.is_empty() {
+        ui.note(format!(
+            "Skipped {} formula(s) that could not be planned:",
+            planning_failures.len()
+        ))
+        .map_err(ui_error)?;
+        for failure in &planning_failures {
+            ui.bullet(format!("{} ({})", failure.name, failure.error))
+                .map_err(ui_error)?;
+        }
+        ui.blank_line().map_err(ui_error)?;
+    }
+
+    if !plan.items.is_empty() {
+        crate::commands::install::execute_formula_plan(
+            installer,
+            &formula_names,
+            plan,
+            false, // no_link
+            ui,
+        )
+        .await
+        .ok();
+    }
 
     let (successfully_installed, failed_installed) =
         check_install_status(installer, &formula_names)?;
