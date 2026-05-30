@@ -6,12 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.1] - 2026-05-30
+
 ### Fixed
 - Centralize a single, sandbox-tolerant rustls `ClientConfig` in `network::tls`: prefer native roots, and fall back to the bundled webpki-roots Mozilla roots when no system trust store is available ([#375](https://github.com/lucasgelfond/zerobrew/pull/375))
 - Correct migration behavior on unplannable formulas ([#380](https://github.com/lucasgelfond/zerobrew/pull/380))
 
 ### Changed
-- Clarify standalone installer shell setup and update flow: surface `zb init` output, print the `source` command after shell config changes, print exact `export`/fish commands for `--no-modify-path`, report installed/updated/already-current status on reruns, and warn when an older `zb` still appears earlier in `PATH` ([#381](https://github.com/lucasgelfond/zerobrew/pull/381))
+- Clarify standalone installer shell setup and update flow: surface `zb init` output, print shell-specific reload commands after shell config changes, print exact `export`/fish commands for `--no-modify-path`, report installed/updated/already-current status on reruns, and warn when an older `zb` still appears earlier in `PATH` ([#381](https://github.com/lucasgelfond/zerobrew/pull/381))
 - Clarify `zb update` help/output and README update docs so users know `zb update` refreshes package metadata while the installer or Homebrew updates the `zb` binary itself ([#381](https://github.com/lucasgelfond/zerobrew/pull/381))
 
 ## [0.3.0] - 2026-05-29
@@ -115,7 +118,8 @@ To get an idea of the initial features zerobrew supports, take a look at the [RE
 
 See the [full commit history](https://github.com/lucasgelfond/zerobrew/commits/v0.1.1) for more details.
 
-[Unreleased]: https://github.com/lucasgelfond/zerobrew/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lucasgelfond/zerobrew/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/lucasgelfond/zerobrew/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/lucasgelfond/zerobrew/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/lucasgelfond/zerobrew/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lucasgelfond/zerobrew/compare/v0.1.2...v0.2.0
