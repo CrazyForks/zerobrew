@@ -244,6 +244,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plain_install_over_older_version_relinks_to_new_version() {
+        // Regression test for #331 (https://github.com/lucasgelfond/zerobrew/issues/331):
+        // `zb install <pkg>` with an older version already installed failed
+        // the link step with conflicts "belonging to" the package itself,
+        // leaving the DB reporting the new version while bin/<pkg> kept
+        // resolving to the old keg.
+        let mock_server = MockServer::start().await;
+        let tmp = TempDir::new().unwrap();
+        let tag = get_test_bottle_tag();
+
+        let bottle_v1 = create_bottle_tarball_with_version("relinkpkg", "1.0.0");
+        let sha_v1 = sha256_hex(&bottle_v1);
+        let bottle_v2 = create_bottle_tarball_with_version("relinkpkg", "2.0.0");
+        let sha_v2 = sha256_hex(&bottle_v2);
+
+        Mock::given(method("GET"))
+            .and(path("/formula/relinkpkg.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(formula_json(
+                &mock_server.uri(),
+                "relinkpkg",
+                "1.0.0",
+                tag,
+                &sha_v1,
+            )))
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/bottles/relinkpkg-1.0.0.{tag}.bottle.tar.gz"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bottle_v1))
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/formula/relinkpkg.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(formula_json(
+                &mock_server.uri(),
+                "relinkpkg",
+                "2.0.0",
+                tag,
+                &sha_v2,
+            )))
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/bottles/relinkpkg-2.0.0.{tag}.bottle.tar.gz"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(bottle_v2))
+            .mount(&mock_server)
+            .await;
+
+        let root = tmp.path().join("zerobrew");
+        let prefix = tmp.path().join("homebrew");
+        let mut installer = make_installer(&root, &prefix, &mock_server.uri());
+
+        installer
+            .install(&["relinkpkg".to_string()], true)
+            .await
+            .unwrap();
+        let bin_link = prefix.join("bin/relinkpkg");
+        assert!(
+            fs::read_link(&bin_link)
+                .unwrap()
+                .to_string_lossy()
+                .contains("1.0.0")
+        );
+
+        installer
+            .install(&["relinkpkg".to_string()], true)
+            .await
+            .expect("install over an older version must not fail the link step");
+
+        let target = fs::read_link(&bin_link).unwrap();
+        let target_str = target.to_string_lossy();
+        assert!(
+            target_str.contains("2.0.0"),
+            "bin symlink must point at 2.0.0, got {target_str}"
+        );
+        assert!(bin_link.exists(), "bin symlink must not be dangling");
+
+        let opt_target = fs::read_link(prefix.join("opt/relinkpkg")).unwrap();
+        assert!(opt_target.to_string_lossy().contains("2.0.0"));
+
+        let installed = installer.get_installed("relinkpkg").unwrap();
+        assert_eq!(installed.version, "2.0.0");
+    }
+
+    #[tokio::test]
     async fn upgrade_with_no_link_does_not_create_symlinks() {
         let mock_server = MockServer::start().await;
         let tmp = TempDir::new().unwrap();

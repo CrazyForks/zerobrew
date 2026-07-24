@@ -102,15 +102,62 @@ fn keg_name_from_path(path: &Path) -> Option<String> {
     None
 }
 
-fn keg_name_from_symlink(dst: &Path) -> Option<String> {
+/// Strip `.` and resolve `..` components without touching the filesystem, so
+/// dangling symlink targets can still be attributed to a keg.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Read the symlink at `dst` and resolve a relative target against its parent
+/// directory. Returns `None` when `dst` is not a symlink.
+fn resolve_link_target(dst: &Path) -> Option<PathBuf> {
     let target = fs::read_link(dst).ok()?;
-    let resolved = if target.is_relative() {
+    Some(if target.is_relative() {
         dst.parent().unwrap_or(Path::new("")).join(&target)
     } else {
         target
+    })
+}
+
+fn keg_name_from_symlink(dst: &Path) -> Option<String> {
+    let resolved = resolve_link_target(dst)?;
+    match fs::canonicalize(&resolved) {
+        Ok(canonical) => keg_name_from_path(&canonical),
+        // Dangling link (e.g. the keg it pointed into was removed): the
+        // target path still identifies the owning keg.
+        Err(_) => keg_name_from_path(&normalize_lexically(&resolved)),
+    }
+}
+
+/// Whether the symlink at `dst` may be silently replaced by a link to `src`.
+///
+/// Regression guard for #331 (https://github.com/lucasgelfond/zerobrew/issues/331):
+/// upgrades and reinstalls used to report the previous version's symlinks as
+/// conflicts "belonging to" the formula itself, leaving the prefix pointing at
+/// the old keg. A link is replaceable when it belongs to another version of
+/// the same keg, or when its target no longer exists (dead links block fresh
+/// installs but protect nothing).
+fn can_replace_existing_link(src: &Path, dst: &Path) -> bool {
+    let Some(resolved) = resolve_link_target(dst) else {
+        return false;
     };
-    let canonical = fs::canonicalize(&resolved).ok()?;
-    keg_name_from_path(&canonical)
+    if !resolved.exists() {
+        return true;
+    }
+    match (keg_name_from_symlink(dst), keg_name_from_path(src)) {
+        (Some(old_owner), Some(new_owner)) => old_owner == new_owner,
+        _ => false,
+    }
 }
 
 impl Linker {
@@ -196,6 +243,9 @@ impl Linker {
                     if fs::canonicalize(&resolved).ok() == fs::canonicalize(&src_path).ok() {
                         continue;
                     }
+                    if can_replace_existing_link(&src_path, &dst_path) {
+                        continue;
+                    }
                 }
                 conflicts.push(ConflictedLink {
                     path: dst_path.clone(),
@@ -245,6 +295,14 @@ impl Linker {
             if matching_old.exists()
                 && fs::canonicalize(&matching_old).ok() != fs::canonicalize(&src_path).ok()
             {
+                // Another version of the same keg (upgrade through a legacy
+                // whole-directory symlink) will be replaced during linking.
+                let old_owner = fs::canonicalize(&matching_old)
+                    .ok()
+                    .and_then(|p| keg_name_from_path(&p));
+                if old_owner.is_some() && old_owner == keg_name_from_path(&src_path) {
+                    continue;
+                }
                 conflicts.push(ConflictedLink {
                     path: dst_path,
                     owned_by: keg_name_from_symlink(dst).or_else(|| keg_name_from_path(old_target)),
@@ -288,10 +346,19 @@ impl Linker {
             // into individual file symlinks instead of conflicting.
             if src_path.is_dir() {
                 if dst_path.symlink_metadata().is_ok() && dst_path.is_symlink() {
-                    let old_target = fs::read_link(&dst_path)
+                    let target = fs::read_link(&dst_path)
                         .map_err(Error::store("failed to read symlink target"))?;
+                    let old_target = if target.is_relative() {
+                        dst_path.parent().unwrap_or(Path::new("")).join(&target)
+                    } else {
+                        target
+                    };
                     let _ = fs::remove_file(&dst_path);
-                    Self::link_recursive(&old_target, &dst_path)?;
+                    // A dangling directory symlink (e.g. the old keg was
+                    // removed) has nothing left to expand.
+                    if old_target.exists() {
+                        Self::link_recursive(&old_target, &dst_path)?;
+                    }
                 }
                 linked.extend(Self::link_recursive(&src_path, &dst_path)?);
                 continue;
@@ -314,6 +381,8 @@ impl Linker {
                         } else {
                             let _ = fs::remove_file(&dst_path);
                         }
+                    } else if can_replace_existing_link(&src_path, &dst_path) {
+                        let _ = fs::remove_file(&dst_path);
                     } else {
                         return Err(Error::LinkConflict {
                             conflicts: vec![ConflictedLink {
@@ -923,5 +992,179 @@ mod tests {
         linker.link_keg(&keg1).unwrap();
         // Pre-flight check should pass since the files don't overlap
         assert!(linker.check_conflicts(&keg2).is_ok());
+    }
+
+    #[test]
+    fn upgrade_relinks_same_formula_to_new_version() {
+        // Regression test for #331 (https://github.com/lucasgelfond/zerobrew/issues/331):
+        // installing a newer version of an already-linked formula reported the
+        // old version's symlinks as conflicts "belonging to" the formula
+        // itself, so the prefix kept pointing at the old keg forever.
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        let old_keg = prefix.join("cellar/gh/1.0.0");
+        fs::create_dir_all(old_keg.join("bin")).unwrap();
+        fs::create_dir_all(old_keg.join("share/man/man1")).unwrap();
+        fs::write(old_keg.join("bin/gh"), b"old").unwrap();
+        fs::write(old_keg.join("share/man/man1/gh.1"), b"old man").unwrap();
+        linker.link_keg(&old_keg).unwrap();
+
+        let new_keg = prefix.join("cellar/gh/2.0.0");
+        fs::create_dir_all(new_keg.join("bin")).unwrap();
+        fs::create_dir_all(new_keg.join("share/man/man1")).unwrap();
+        fs::write(new_keg.join("bin/gh"), b"new").unwrap();
+        fs::write(new_keg.join("share/man/man1/gh.1"), b"new man").unwrap();
+
+        assert!(
+            linker.check_conflicts(&new_keg).is_ok(),
+            "another version of the same formula must not count as a conflict"
+        );
+        linker.link_keg(&new_keg).unwrap();
+
+        for link in ["bin/gh", "share/man/man1/gh.1"] {
+            let target = fs::read_link(prefix.join(link)).unwrap();
+            let target = target.to_string_lossy();
+            assert!(
+                target.contains("2.0.0"),
+                "{link} must point at 2.0.0, got {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn relinks_when_old_keg_directory_was_removed() {
+        // #331 fallout: an upgrade that removed the old keg but died before
+        // relinking leaves dangling same-formula symlinks; the next install
+        // must replace them instead of conflicting.
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        let old_keg = setup_keg(&tmp, "foo");
+        linker.link_keg(&old_keg).unwrap();
+        fs::remove_dir_all(&old_keg).unwrap();
+        assert!(prefix.join("bin/foo").is_symlink());
+
+        let new_keg = prefix.join("cellar/foo/2.0.0");
+        fs::create_dir_all(new_keg.join("bin")).unwrap();
+        fs::write(new_keg.join("bin/foo"), b"new").unwrap();
+
+        assert!(linker.check_conflicts(&new_keg).is_ok());
+        linker.link_keg(&new_keg).unwrap();
+
+        let target = fs::read_link(prefix.join("bin/foo")).unwrap();
+        assert!(target.to_string_lossy().contains("2.0.0"));
+        assert!(prefix.join("bin/foo").exists(), "link must not be dangling");
+    }
+
+    #[test]
+    fn replaces_dangling_symlink_from_other_formula() {
+        // Orphaned links whose keg no longer exists (#188 fallout) used to
+        // block unrelated installs with phantom conflicts. A dead link
+        // protects nothing and is safe to replace.
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        std::os::unix::fs::symlink(
+            prefix.join("cellar/ghost/1.0.0/bin/tool"),
+            prefix.join("bin/tool"),
+        )
+        .unwrap();
+
+        let keg = prefix.join("cellar/tool/1.0.0");
+        fs::create_dir_all(keg.join("bin")).unwrap();
+        fs::write(keg.join("bin/tool"), b"real").unwrap();
+
+        assert!(linker.check_conflicts(&keg).is_ok());
+        linker.link_keg(&keg).unwrap();
+
+        let target = fs::read_link(prefix.join("bin/tool")).unwrap();
+        assert!(target.to_string_lossy().contains("cellar/tool/1.0.0"));
+    }
+
+    #[test]
+    fn live_symlink_from_other_formula_still_conflicts() {
+        // Replacement is limited to same-formula and dead links; a live link
+        // owned by a different formula must keep failing all-or-none.
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        let keg1 = setup_keg(&tmp, "alpha");
+        linker.link_keg(&keg1).unwrap();
+
+        let keg2 = prefix.join("cellar/beta/1.0.0");
+        fs::create_dir_all(keg2.join("bin")).unwrap();
+        fs::write(keg2.join("bin/alpha"), b"other").unwrap();
+
+        let result = linker.check_conflicts(&keg2);
+        assert!(result.is_err());
+        if let Err(Error::LinkConflict { conflicts }) = result {
+            assert_eq!(conflicts[0].owned_by.as_deref(), Some("alpha"));
+        }
+        assert!(linker.link_keg(&keg2).is_err());
+        let target = fs::read_link(prefix.join("bin/alpha")).unwrap();
+        assert!(target.to_string_lossy().contains("alpha/1.0.0"));
+    }
+
+    #[test]
+    fn upgrade_expands_legacy_directory_symlink_owned_by_same_formula() {
+        // Whole-directory symlinks left by older layouts must be expanded and
+        // replaced when the owning formula is upgraded, not reported as a
+        // conflict for every file inside.
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        let old_keg = prefix.join("cellar/foo/1.0.0");
+        fs::create_dir_all(old_keg.join("share/doc/foo")).unwrap();
+        fs::write(old_keg.join("share/doc/foo/README"), b"old").unwrap();
+        fs::create_dir_all(prefix.join("share/doc")).unwrap();
+        std::os::unix::fs::symlink(old_keg.join("share/doc/foo"), prefix.join("share/doc/foo"))
+            .unwrap();
+
+        let new_keg = prefix.join("cellar/foo/2.0.0");
+        fs::create_dir_all(new_keg.join("share/doc/foo")).unwrap();
+        fs::write(new_keg.join("share/doc/foo/README"), b"new").unwrap();
+
+        assert!(linker.check_conflicts(&new_keg).is_ok());
+        linker.link_keg(&new_keg).unwrap();
+
+        let readme = prefix.join("share/doc/foo/README");
+        let target = fs::read_link(&readme).unwrap();
+        assert!(target.to_string_lossy().contains("2.0.0"));
+    }
+
+    #[test]
+    fn dangling_directory_symlink_is_replaced() {
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path();
+        let linker = Linker::new(prefix).unwrap();
+
+        std::os::unix::fs::symlink(
+            prefix.join("cellar/foo/0.9.0/share/foo"),
+            prefix.join("share/foo"),
+        )
+        .unwrap();
+
+        let keg = prefix.join("cellar/foo/1.0.0");
+        fs::create_dir_all(keg.join("share/foo")).unwrap();
+        fs::write(keg.join("share/foo/data.txt"), b"data").unwrap();
+
+        assert!(linker.check_conflicts(&keg).is_ok());
+        linker.link_keg(&keg).unwrap();
+
+        assert!(prefix.join("share/foo/data.txt").exists());
+    }
+
+    #[test]
+    fn keg_name_from_symlink_attributes_dangling_links() {
+        let tmp = TempDir::new().unwrap();
+        let link = tmp.path().join("gh");
+        std::os::unix::fs::symlink(tmp.path().join("cellar/gh/1.0.0/bin/gh"), &link).unwrap();
+        assert_eq!(keg_name_from_symlink(&link).as_deref(), Some("gh"));
     }
 }
